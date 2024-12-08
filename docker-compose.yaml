@@ -1,0 +1,103 @@
+services:
+  app:
+    build: ./app
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+    networks:
+      - monitoring_net
+    depends_on:
+      - elasticsearch
+    env_file:
+      - .env
+    mem_limit: 512m
+    cpus: 0.5
+
+  elasticsearch:
+    image: bitnami/elasticsearch:8.15.3
+    container_name: elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms256m -Xmx256m
+    volumes:
+      - ./elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
+    ports:
+      - "9200:9200"
+    networks:
+      - monitoring_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    mem_limit: 1g
+    cpus: 1.0
+
+  kibana:
+    image: bitnami/kibana:8.15.3
+    container_name: kibana
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    networks:
+      - monitoring_net
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    volumes:
+      - ./kibana/kibana.yml:/opt/bitnami/kibana/config/kibana.yml
+      - ./kibana/setup-kibana.sh:/opt/bitnami/scripts/setup-kibana.sh
+    entrypoint: /bin/bash
+    command: |
+      /opt/bitnami/scripts/kibana/run.sh &
+      sleep 30 && bash /opt/bitnami/scripts/setup-kibana.sh
+
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./prometheus:/etc/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - monitoring_net
+    mem_limit: 512m
+    cpus: 0.5
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring_net
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    mem_limit: 512m
+    cpus: 0.5
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/provisioning/dashboards/network_monitoring:/etc/grafana/provisioning/dashboards/network_monitoring
+
+  logstash:
+    image: bitnami/logstash:8.15.3
+    container_name: logstash
+    volumes:
+      - ./logstash/pipeline/logstash.conf:/opt/bitnami/logstash/pipeline/logstash.conf
+    depends_on:
+      - elasticsearch
+    networks:
+      - monitoring_net
+    environment:
+      - LS_JAVA_OPTS=-Xmx512m -Xms512m
+    mem_limit: 512m
+    cpus: 0.5
+
+volumes:
+  esdata:
+
+networks:
+  monitoring_net:
+    driver: bridge
